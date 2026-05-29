@@ -1,0 +1,188 @@
+version: '3.8'
+
+services:
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3000/api
+      - VITE_GOOGLE_MAPS_KEY=${VITE_GOOGLE_MAPS_KEY}
+    depends_on:
+      - gateway
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # API Gateway
+  gateway:
+    build:
+      context: ./backend/gateway
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - GATEWAY_PORT=3000
+      - GATEWAY_ENV=production
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - TRACKING_SERVICE_URL=http://tracking-service:3002
+      - BILLING_SERVICE_URL=http://billing-service:3003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3004
+      - AI_SERVICE_URL=http://ai-service:8000
+    depends_on:
+      - auth-service
+      - tracking-service
+      - billing-service
+      - notification-service
+      - ai-service
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./backend/auth-service
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - AUTH_PORT=3001
+      - AUTH_DB_URL=mongodb://admin:admin123@mongo:27017/auth_db?authSource=admin
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET}
+      - AUTH_JWT_REFRESH_SECRET=${AUTH_JWT_REFRESH_SECRET}
+      - AUTH_JWT_EXPIRY=15m
+      - AUTH_REFRESH_EXPIRY=7d
+      - AUTH_EMAIL_USER=${AUTH_EMAIL_USER}
+      - AUTH_EMAIL_PASSWORD=${AUTH_EMAIL_PASSWORD}
+      - NODE_ENV=production
+    depends_on:
+      - mongo
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # Tracking Service
+  tracking-service:
+    build:
+      context: ./backend/tracking-service
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - TRACKING_PORT=3002
+      - TRACKING_DB_URL=mongodb://admin:admin123@mongo:27017/tracking_db?authSource=admin
+      - TRACKING_REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # Billing Service
+  billing-service:
+    build:
+      context: ./backend/billing-service
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - BILLING_PORT=3003
+      - BILLING_DB_URL=mongodb://admin:admin123@mongo:27017/billing_db?authSource=admin
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - NODE_ENV=production
+    depends_on:
+      - mongo
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./backend/notification-service
+      dockerfile: Dockerfile
+    ports:
+      - "3004:3004"
+    environment:
+      - NOTIFICATION_PORT=3004
+      - NOTIFICATION_DB_URL=mongodb://admin:admin123@mongo:27017/notification_db?authSource=admin
+      - NOTIFICATION_EMAIL_USER=${NOTIFICATION_EMAIL_USER}
+      - NOTIFICATION_EMAIL_PASSWORD=${NOTIFICATION_EMAIL_PASSWORD}
+      - NODE_ENV=production
+    depends_on:
+      - mongo
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # AI Service (Python FastAPI)
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - AI_SERVICE_PORT=8000
+      - PYTHONUNBUFFERED=1
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # MongoDB
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin123
+    volumes:
+      - mongo-data:/data/db
+      - ./backend/scripts/mongo-init.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # Redis
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+  # NGINX Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - gateway
+      - frontend
+    networks:
+      - logistics-network
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  redis-data:
+
+networks:
+  logistics-network:
+    driver: bridge
